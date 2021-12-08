@@ -201,7 +201,7 @@ __global__ void _d_solve_task(num_t n, result_t* g_results)
     {
         s_results[tidy].num = n;
         s_results[tidy].sum = 0;
-        s_results[tidy].base = std::numeric_limits<base_t>::max();
+        s_results[tidy].base = n; //std::numeric_limits<base_t>::max();
     }
     __syncthreads();
     
@@ -214,7 +214,7 @@ __global__ void _d_solve_task(num_t n, result_t* g_results)
     {
         // If the sum is not a power of any number, write to num invalid value
         // - 0
-        if (s_results[tidy].base == std::numeric_limits<base_t>::max())
+        if (s_results[tidy].base == n)
             s_results[tidy].num = std::numeric_limits<num_t>::max();
     }
     // Other threads on current group leave the execution of this kernel
@@ -231,52 +231,63 @@ __global__ void _d_solve_task(num_t n, result_t* g_results)
             if (s_results[tidy + step].num < s_results[tidy].num)
                 s_results[tidy] = s_results[tidy + step];
         }
-        else
-            return;
     }
 
     // Write minimum value to global memory
-    g_results[bid] = s_results[0];
+    if (tidx == 0)
+        g_results[bid] = s_results[0];
 }
 
 __global__ void _d_minReduce(unsigned int size, result_t* g_results)
 {
     extern __shared__ result_t s_results[];
 
-    // Count of array items for each thread
-    const unsigned int count = size / blockDim.x;
-    // Scaled thread id
-    const unsigned int stid = count * threadIdx.x;
+    const unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int bid = blockIdx.x;
+    const unsigned int tid = threadIdx.x;
 
-    if (stid >= size)
-        return;
-
-    // Write data from global to shared memory
-    for (unsigned int i = 0; i < count; i++)
-        s_results[stid + i] = g_results[stid + i];
+    s_results[tid] = g_results[gid];
     __syncthreads();
 
-    // Find the minimum value among the array items for each thread
-    for (unsigned int i = 1; i < count; i++)
-        if (s_results[stid + i].num < s_results[stid].num)
-            s_results[stid] = s_results[stid + i];
-    
     // Find the minimum value of "s_results" array and write it to zero item
-    for (unsigned int step = 1; step < size; step *= 2)
+    for (unsigned int step = 1; step < blockDim.x; step *= 2)
     {
-        if (stid % (2 * step) == 0)
+        if (tid % (2 * step) == 0)
         {
-            if (s_results[stid + step].num < s_results[stid].num)
-                s_results[stid] = s_results[stid + step];
+            if (s_results[tid + step].num < s_results[tid].num)
+                s_results[tid] = s_results[tid + step];
         }
-        else
-            return;
     }
 
     // Write minimum value to first item in global memory
-    g_results[0] = s_results[0];
+    if (tid == 0)
+        g_results[bid] = s_results[0];
 }
 
+__host__ cudaError_t _h_minReduce(size_t size, result_t* d_results)
+{
+    cudaError_t cudaError;
+
+    unsigned int blocks_count = (unsigned int)ceil((double)size / MAX_THREADS);
+
+    _d_minReduce
+    <<<
+        blocks_count, MAX_THREADS, sizeof(result_t) * MAX_THREADS
+    >>>(size, d_results);
+    cudaDeviceSynchronize();
+    cudaError = cudaGetLastError();
+    VALIDATE_CUDA_NO_PRINT(cudaError, cudaError);
+
+    _d_minReduce
+    <<<
+        1, blocks_count, sizeof(result_t) * blocks_count
+    >>>(blocks_count, d_results);
+    cudaDeviceSynchronize();
+    cudaError = cudaGetLastError();
+    VALIDATE_CUDA_NO_PRINT(cudaError, cudaError);
+
+    return cudaSuccess;
+}
 
 #define WRITE_STATUS(ptr, error)    \
 do                                  \
@@ -333,7 +344,7 @@ __host__ result_t h_start_kernel
         // in it's numbers group and writes result to global memory
         _d_solve_task
         <<<
-            globalDim3, localDim3, sizeof(h_result) * localDim3.y
+            blocks_count, localDim3, sizeof(h_result) * localDim3.y
         >>>(n, d_results);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
@@ -344,20 +355,12 @@ __host__ result_t h_start_kernel
             cudaError, "Failed to run '_d_solve_task' kernel.", h_result
         );
 
-        // Starting minReduce kernel. One CUDA block reads all intermidiate
-        // results from global memory, finds the minimum among them and write
-        // it to first global memory item
-        _d_minReduce
-        <<<
-            1, 1024, sizeof(h_result) * blocks_count
-        >>>(blocks_count, d_results);
-        cudaDeviceSynchronize();
-        cudaError = cudaGetLastError();
+        cudaError = _h_minReduce(blocks_count, d_results);
         WRITE_STATUS(cudaStatus, cudaError);
         VALIDATE_AND_RELEASE(cudaError, d_results);
         VALIDATE_CUDA
         (
-            cudaError, "Failed to run '_d_minReduce' kernel.", h_result
+            cudaError, "Failed to run '_d_solve_task' kernel.", h_result
         );
 
         // Copy to h_result zero item of d_results

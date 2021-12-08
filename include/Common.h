@@ -10,7 +10,9 @@
 #include <device_launch_parameters.h>
 
 
-constexpr size_t WARP_SIZE = 32;
+constexpr size_t WARP_SIZE          = 32;
+constexpr size_t MAX_THREADS        = 1024;
+constexpr size_t BLOCK_DIM_X_MAX    = (1 << 16) - 1;
 
 
 using num_t     = unsigned long long int;
