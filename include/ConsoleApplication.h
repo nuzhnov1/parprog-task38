@@ -30,7 +30,7 @@ public:
     static constexpr num_t MIN_NUM = 0;
     static constexpr num_t MAX_NUM = std::numeric_limits<num_t>::max() - 1;
     static constexpr unsigned int MIN_BLOCKS = 1;
-    static constexpr unsigned int MAX_BLOCKS = (1 << 16);
+    static constexpr unsigned int MAX_BLOCKS = 2048;
     static constexpr unsigned int DEFAULT_BLOCKS = 1024;
 
     static int mainLoop(int argc, char* argv[]);
