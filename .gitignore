@@ -1,0 +1,7 @@
+# Exclude files and directories
+/.vscode
+/bin
+/obj
+/lib
+task38.tar
+*.txt
