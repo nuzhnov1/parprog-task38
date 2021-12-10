@@ -1,5 +1,4 @@
 #include "ConsoleApplication.h"
-#include "Solver.cuh"
 
 #include <iostream>
 #include <cstdlib>
@@ -66,7 +65,6 @@ public:
     {
         bool is_valid = value >= ConsoleApplication::MIN_BLOCKS &&
                         value <= ConsoleApplication::MAX_BLOCKS;
-        is_valid &= h_d_checkPower(value, 2);
 
         return is_valid;
     }
@@ -159,10 +157,7 @@ bool ConsoleApplication::solve()
 
     // if "g" flag is set - initialize value of dimensions
     if (s_args.g)
-    {
-        s_task.setLocalDim({WARP_SIZE, WARP_SIZE, 1});
         s_task.setGlobalDim({s_args.block_size, 1, 1});
-    }
 
     if (s_args.c)
     {

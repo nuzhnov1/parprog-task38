@@ -23,9 +23,8 @@ private:
 	result_t m_resultCPU;
 	result_t m_resultGPU;
 
-    // Size of dimensions of blocks and threads
+    // Size of dimensions of blocks
     dim3 m_globalDim;
-    dim3 m_localDim;
 
 public:
     Task() {}
@@ -38,12 +37,6 @@ public:
         m_globalDim.y = globalDim[1];
         m_globalDim.z = globalDim[2];
     }
-    inline void setLocalDim(const dim3_t& localDim)
-    { 
-        m_localDim.x = localDim[0];
-        m_localDim.y = localDim[1];
-        m_localDim.z = localDim[2];
-    }
 
     inline bool CPU_Solve_task()
     { 
@@ -54,7 +47,7 @@ public:
     {
         cudaError_t cudaError;
         
-        m_resultGPU = h_start_kernel(m_N, m_localDim, m_globalDim, &cudaError);
+        m_resultGPU = h_start_kernel(m_N, m_globalDim, &cudaError);
         VALIDATE_CUDA_NO_PRINT(cudaError, false);
 
         return true;

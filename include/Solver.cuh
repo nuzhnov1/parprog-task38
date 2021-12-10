@@ -17,7 +17,7 @@ __host__ result_t h_solve_task(num_t n);
 __host__ result_t h_start_kernel
 (
     num_t n,
-    const dim3& localDim3, const dim3& globalDim3,
+    const dim3& globalDim3,
     cudaError_t* const cudaStatus
 );
 
