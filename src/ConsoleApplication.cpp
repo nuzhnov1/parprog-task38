@@ -1,5 +1,4 @@
 #include "ConsoleApplication.h"
-#include "Solver.cuh"
 
 #include <iostream>
 #include <cstdlib>
@@ -58,15 +57,18 @@ public:
 // Checks the input value of blocks
 class BlocksConstraint: public TCLAP::Constraint<unsigned int>
 {
+private:
+    unsigned int m_max_blocks;
+
 public:
-    BlocksConstraint(): TCLAP::Constraint<unsigned int>() {}
+    BlocksConstraint(unsigned int max_blocks):
+        TCLAP::Constraint<unsigned int>(), m_max_blocks(max_blocks)
+    {}
     virtual ~BlocksConstraint() {}
 
     virtual bool check(const unsigned int& value) const override
     {
-        bool is_valid = value >= ConsoleApplication::MIN_BLOCKS &&
-                        value <= ConsoleApplication::MAX_BLOCKS;
-        is_valid &= h_d_checkPower(value, 2);
+        bool is_valid = value >= 1 && value <= m_max_blocks;
 
         return is_valid;
     }
@@ -75,9 +77,7 @@ public:
     {
         std::string desc = 
             std::string("input value of blocks must not be greater then ") +
-            std::to_string(ConsoleApplication::MAX_BLOCKS) + " or less then " +
-            std::to_string(ConsoleApplication::MIN_BLOCKS) + " and " +
-            "also this value must be power of 2";
+            std::to_string(m_max_blocks) + " or less then 1";
         
         return desc;
     }
@@ -89,10 +89,31 @@ public:
 };
 
 
-int ConsoleApplication::mainLoop(int argc, char* argv[])
+int ConsoleApplication::mainLoop(const Device& dev, int argc, char* argv[])
 {
-    CHECK_CALL(parseArguments(argc, argv), -1);
-    CHECK_CALL(solve(), -2);
+    s_task.setDevice(dev);
+    CHECK_CALL(parseArguments(argc, argv), -2);
+    
+    // If "-i" argument is set - print information about device
+    if (s_args.i)
+        std::cout << dev << std::endl;
+    
+    // If value of number is set
+    if (s_args.v)
+    {
+        // And the flags of the using methods are not set
+        if (!s_args.c && !s_args.g)
+            // By default use "-g" flag and solve task only on GPU
+            s_args.g = true;
+    }
+    // If value of number is not set, but one of the flags "-c" or "-g" is set
+    else if (s_args.c || s_args.g)
+    {
+        std::cerr << "Error: value argument is not specified." << std::endl;
+        return -3; 
+    }
+    
+    CHECK_CALL(solve(), -4);
 
     return 0;
 }
@@ -105,19 +126,27 @@ bool ConsoleApplication::parseArguments(int argc, char* argv[])
     {
         TCLAP::SwitchArg c_arg
         (
-            "c", "use-cpu", "Use sequential sorting on CPU", false
+            "c", "use-cpu", "Solve task on CPU", false
         );
         TCLAP::SwitchArg g_arg
         (
             "g", "use-gpu",
-            "Use parallel sorting on GPU, using CUDA", false
+            "Solve task on GPU, using CUDA", false
+        );
+        TCLAP::SwitchArg i_arg
+        (
+            "i", "info",
+            "Print information about using devices", false
         );
         
-        BlocksConstraint blocks_constraint;
+        BlocksConstraint blocks_constraint
+        (
+            s_task.getDevice().getMaxGridSize()[0]
+        );
         TCLAP::ValueArg<unsigned int> b_arg
         (
             "b",  "blocks",
-            "Number of blocks using to parallel", false, DEFAULT_BLOCKS, 
+            "Number of CUDA blocks using to parallel", false, DEFAULT_BLOCKS, 
             &blocks_constraint,
             nullptr
         );
@@ -126,17 +155,21 @@ bool ConsoleApplication::parseArguments(int argc, char* argv[])
         TCLAP::UnlabeledValueArg<num_t> val_arg
         (
             "v", "input value",
-            true, 0,
+            false, 0,
             &num_constraint, false,
             nullptr 
         );
         
         cmd.add(val_arg);
-        cmd.add(b_arg); cmd.add(g_arg); cmd.add(c_arg);
+        cmd.add(b_arg);
+        cmd.add(i_arg); cmd.add(g_arg); cmd.add(c_arg);
 
         cmd.parse(argc, argv);
 
-        s_args.c = c_arg.isSet(); s_args.g = g_arg.isSet();
+        s_args.v = val_arg.isSet();
+        s_args.c = c_arg.isSet();
+        s_args.g = g_arg.isSet();
+        s_args.i = i_arg.isSet();
         s_args.block_size = b_arg.getValue();
         s_args.n_value = val_arg.getValue();
     }
@@ -146,9 +179,6 @@ bool ConsoleApplication::parseArguments(int argc, char* argv[])
             "." << std::endl;
         return false;
     }
-
-    if (!s_args.c && !s_args.g)
-        s_args.g = true;
     
     return true;
 }
@@ -159,10 +189,7 @@ bool ConsoleApplication::solve()
 
     // if "g" flag is set - initialize value of dimensions
     if (s_args.g)
-    {
-        s_task.setLocalDim({WARP_SIZE, WARP_SIZE, 1});
         s_task.setGlobalDim({s_args.block_size, 1, 1});
-    }
 
     if (s_args.c)
     {

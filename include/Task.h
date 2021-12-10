@@ -5,6 +5,7 @@
 #include <array>
 
 #include "Common.h"
+#include "Device.h"
 #include "Solver.cuh"
 #include "Timer.h"
 
@@ -23,38 +24,35 @@ private:
 	result_t m_resultCPU;
 	result_t m_resultGPU;
 
-    // Size of dimensions of blocks and threads
+    // Pointer to using device
+    Device m_dev;
+
+    // Size of dimensions of blocks
     dim3 m_globalDim;
-    dim3 m_localDim;
 
 public:
     Task() {}
 	~Task() {}
 
     inline void setData(num_t n) { m_N = n; }
+    inline void setDevice(const Device& dev) { m_dev = dev; }
     inline void setGlobalDim(const dim3_t& globalDim)
     {
         m_globalDim.x = globalDim[0];
         m_globalDim.y = globalDim[1];
         m_globalDim.z = globalDim[2];
     }
-    inline void setLocalDim(const dim3_t& localDim)
-    { 
-        m_localDim.x = localDim[0];
-        m_localDim.y = localDim[1];
-        m_localDim.z = localDim[2];
-    }
 
     inline bool CPU_Solve_task()
     { 
-        m_resultCPU = h_solve_task(m_N);
+        m_resultCPU = host_solve_task(m_N);
         return true;
     }
 	inline bool GPU_Solve_task()
     {
         cudaError_t cudaError;
         
-        m_resultGPU = h_start_kernel(m_N, m_localDim, m_globalDim, &cudaError);
+        m_resultGPU = device_solve_task(m_dev, m_N, m_globalDim, &cudaError);
         VALIDATE_CUDA_NO_PRINT(cudaError, false);
 
         return true;
@@ -74,6 +72,8 @@ public:
 
     bool TestCPU();
     bool TestGPU();
+
+    inline const Device& getDevice() const { return m_dev; }
 
     inline result_t getResultCPU() const { return m_resultCPU; }
     inline result_t getResultGPU() const { return m_resultGPU; }

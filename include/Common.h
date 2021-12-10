@@ -10,9 +10,6 @@
 #include <device_launch_parameters.h>
 
 
-constexpr size_t WARP_SIZE = 32;
-
-
 using num_t     = unsigned long long int;
 using base_t    = unsigned int;
 
@@ -53,6 +50,24 @@ do                                                                      \
 {                                                                       \
     if ((status) != cudaSuccess)                                        \
         return ret;                                                     \
+} while (0);
+
+#define WRITE_STATUS(ptr, error)    \
+do                                  \
+{                                   \
+    if ((cudaStatus) != nullptr)    \
+        *(ptr) = (error);           \
+} while (0);
+
+#define SAFE_RELEASE_CUDA_MEM(ptr) cudaFree(ptr); (ptr) = nullptr;
+
+#define VALIDATE_AND_RELEASE(status, ptr)   \
+do                                          \
+{                                           \
+    if ((status) != cudaSuccess)            \
+    {                                       \
+        SAFE_RELEASE_CUDA_MEM(ptr);         \
+    }                                       \
 } while (0);
 
 
