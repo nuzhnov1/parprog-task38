@@ -212,7 +212,7 @@ __global__ void _d_solve_task(num_t n, result_t* const g_results)
     {
         s_results[wid].num = n;
         s_results[wid].sum = 0;
-        s_results[wid].base = n; // RELEASE: std::numeric_limits<base_t>::max();
+        s_results[wid].base = std::numeric_limits<base_t>::max();
     }
     __syncwarp();
     
@@ -226,7 +226,7 @@ __global__ void _d_solve_task(num_t n, result_t* const g_results)
     {
         // If the sum is not a power of any number, write to num invalid value
         // - maximum number
-        if (s_results[wid].base == n)  // RELEASE: std::numeric_limits<base_t>::max();
+        if (s_results[wid].base == std::numeric_limits<base_t>::max())
             s_results[wid].num = std::numeric_limits<num_t>::max();
     }
     else
@@ -276,7 +276,7 @@ __global__ void _d_minReduce
     // Find the minimum value of "s_results" array and write it to zero item
     for (unsigned int step = 1; step < blockDim.x; step *= 2)
     {
-        if (tid % (2 * step) == 0)
+        if ((tid % (2 * step)) == 0 && (tid + step < blockDim.x))
         {
             if (s_results[tid + step].num < s_results[tid].num)
                 s_results[tid] = s_results[tid + step];
