@@ -5,7 +5,7 @@
 #include <algorithm>
 
 
-// Auxiliary functions on CPU and GPU
+// Auxiliary functions on Host and Device
 ///////////////////////////////////////////////////////////////////////////////
 __forceinline__ __host__ __device__ unsigned int _h_d_getNumberLen(num_t n)
 {
@@ -27,10 +27,10 @@ __forceinline__ __host__ __device__ unsigned int _h_d_getNumberLen(num_t n)
 __host__ num_t h_getSumCompactSubSequences(num_t n)
 {
     num_t result = 0;  // sum of all compact subsequences
-    unsigned int number_len = _h_d_getNumberLen(n);  // lenth of number "n"
+    unsigned int number_len = _h_d_getNumberLen(n);  // lenth of number n
 
     // Iterate over all possible lengths of compact subsequences of the
-    // number "n": [1, 2, ... , length of number - 1]
+    // number n: [1, 2, ... , length of number - 1]
     for (unsigned int seq_len = 1; seq_len < number_len; seq_len++)
     {
         // Iterate over all possible compact subsequences with current length
@@ -62,7 +62,7 @@ __host__ base_t _h_findFirstBase(num_t n)
     return 0;
 }
 
-__host__ result_t h_solve_task(num_t n)
+__host__ result_t host_solve_task(num_t n)
 {
     for (n++; true; n++)
     {
@@ -84,7 +84,7 @@ __device__ void _d_getSumCompactSubSequences
     num_t* const result
 )
 {
-    // Length of number "n"
+    // Length of number n
     const unsigned int number_len = _h_d_getNumberLen(n);
     // Required number of threads
     const unsigned int required_threads = (number_len + 2) * 
@@ -195,7 +195,7 @@ __global__ void _d_solve_task(num_t n, result_t* const g_results)
     // WARNING: blockIdx.y must be equal to warp size!
     // So blockIdx.x = MAX_THREADS / (warp size) - count of warps in block
     
-    extern __shared__ result_t s_results[];  // Solving results
+    extern __shared__ result_t s_results[];  // Solving intermidiate results
 
     const unsigned int bid = blockIdx.x;   // ID of block in grid
     const unsigned int wid = threadIdx.y;  // ID of warp in block
@@ -204,7 +204,7 @@ __global__ void _d_solve_task(num_t n, result_t* const g_results)
     const unsigned int warp_count = blockDim.y;  // Also it's size of s_results
     const unsigned int warp_size  = blockDim.x;  // Count of threads in warp
 
-    // Value of "n" for current warp
+    // Value of n for current warp
     n = n + bid * warp_count + wid + 1;
 
     // Initializing shared results for each warp
@@ -234,7 +234,7 @@ __global__ void _d_solve_task(num_t n, result_t* const g_results)
     
     __syncthreads();
 
-    // Finding the minimum value of "s_results" array and write it to zero item
+    // Finding the minimum value of s_results array and write it to zero item
     for (unsigned int step = 1; step < warp_count; step *= 2)
     {
         if (wid % (2 * step) == 0)
@@ -264,16 +264,15 @@ __global__ void _d_minReduce
     const unsigned int bid = blockIdx.x;   // ID of block
     const unsigned int tid = threadIdx.x;  // ID of thread in block
 
-    // All threads with "gid" greater then size - leave the execution of this
-    // kernel
+    // All threads with gid greater then size - leave the execution of kernel
     if (gid >= size)
         return;
 
-    // Write data from input global memory to shared
+    // Write data from input global memory to shared one
     s_results[tid] = input[gid];
     __syncthreads();
 
-    // Find the minimum value of "s_results" array and write it to zero item
+    // Find the minimum value of s_results array and write it to zero item
     for (unsigned int step = 1; step < blockDim.x; step *= 2)
     {
         if ((tid % (2 * step)) == 0 && (tid + step < blockDim.x))
@@ -290,38 +289,30 @@ __global__ void _d_minReduce
         output[bid] = s_results[0];
 }
 
-#define WRITE_STATUS(ptr, error)    \
-do                                  \
-{                                   \
-    if ((cudaStatus) != nullptr)    \
-        *(ptr) = (error);           \
-} while (0);
-
-#define SAFE_RELEASE_CUDA_MEM(ptr) cudaFree(ptr); (ptr) = nullptr;
-
-#define VALIDATE_AND_RELEASE(status, ptr)   \
-do                                          \
-{                                           \
-    if ((status) != cudaSuccess)            \
-    {                                       \
-        SAFE_RELEASE_CUDA_MEM(ptr);         \
-    }                                       \
-} while (0);
-
 __host__ result_t _h_minReduce
 (
+    const Device& dev,
     size_t size, result_t* d_array,
     cudaError_t* const cudaStatus
 )
 {
+    // chunk_size must be not greater than max_threads
+    // So maximum value of "size" is 2 ^ 20
+
     cudaError_t cudaError;
-    result_t* d_interm_results;
-    result_t* d_result;
+    result_t* d_interm_results;  // intermidiate results on device
+    result_t* d_result;          // final result on device
     result_t h_result = {std::numeric_limits<num_t>::max(), 0, 0};
 
-    // chunk_size must be not greate then MAX_THREADS!
-    // So maximum value of "size" is 2 ^ 20
-    unsigned int threads_count = MAX_THREADS;
+    unsigned int max_threads    = dev.getMaxThreadsDim()[0];
+    size_t max_shared_mem_size  = dev.getSharedPerBlockMem();
+    unsigned int threads_count  = max_threads;
+
+    // If there is not enough shared memory for each block - 
+    // reduce the number of threads
+    if (max_threads * sizeof(result_t) >= max_shared_mem_size - 512)
+        threads_count = (max_shared_mem_size - 512) / sizeof(result_t);
+    
     unsigned int chunk_size = ceil((double)size / threads_count);
 
     if (chunk_size == 0)
@@ -349,7 +340,7 @@ __host__ result_t _h_minReduce
     );
 
     // Starting '_d_minReduce' kernel to get intermidiate results
-    threads_count = std::min(size, MAX_THREADS);
+    threads_count = std::min((unsigned int)size, max_threads);
     _d_minReduce
     <<<
         chunk_size,
@@ -368,7 +359,7 @@ __host__ result_t _h_minReduce
         h_result
     );
 
-    // Starting '_d_minReduce' kernel to get final results
+    // Starting '_d_minReduce' kernel again with one block to get final results
     _d_minReduce
     <<<
         1, chunk_size, sizeof(result_t) * chunk_size
@@ -408,18 +399,21 @@ __host__ result_t _h_minReduce
     return h_result;
 }
 
-__host__ result_t h_start_kernel
+__host__ result_t device_solve_task
 (
+    const Device& dev,
     num_t n,
     const dim3& globalDim3,
     cudaError_t* const cudaStatus
 )
 {
     cudaError_t cudaError;
-    // Write to h_result invalid value
+    // Initialize h_result with an invalid value
     result_t h_result = {std::numeric_limits<num_t>::max(), 0, 0};
     result_t* d_results;
 
+    unsigned int max_threads  = dev.getMaxThreadsDim()[0];
+    unsigned int warp_size    = dev.getWarpSize();
     unsigned int blocks_count = globalDim3.x;
 
     cudaError = cudaMalloc(&d_results, sizeof(result_t) * blocks_count);
@@ -438,7 +432,7 @@ __host__ result_t h_start_kernel
         // While h_result is invalid:
         h_result.num == std::numeric_limits<num_t>::max();
         // Move to next numbers group
-        n += WARP_SIZE * blocks_count
+        n += warp_size * blocks_count
     )
     {
         // Starting main kernel. Each CUDA block find the minimum value of "n"
@@ -446,8 +440,8 @@ __host__ result_t h_start_kernel
         _d_solve_task
         <<<
             blocks_count,
-            {MAX_THREADS / WARP_SIZE, WARP_SIZE},
-            sizeof(result_t) * WARP_SIZE
+            {max_threads / warp_size, warp_size},
+            sizeof(result_t) * warp_size
         >>>(n, d_results);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
@@ -458,7 +452,9 @@ __host__ result_t h_start_kernel
             cudaError, "Failed to run '_d_solve_task' kernel.", h_result
         );
 
-        h_result = _h_minReduce(blocks_count, d_results, &cudaError);
+        // Find the minimum value for the num field among the
+        // intermediate results
+        h_result = _h_minReduce(dev, blocks_count, d_results, &cudaError);
         WRITE_STATUS(cudaStatus, cudaError);
         VALIDATE_AND_RELEASE(cudaError, d_results);
         VALIDATE_CUDA_NO_PRINT(cudaError, h_result);
